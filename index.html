@@ -14,7 +14,7 @@
         button:hover { background-color: #0056b3; }
         button:disabled { background-color: #ccc; cursor: not-allowed; }
         #status { margin-top: 20px; font-weight: bold; color: #333; }
-        .log { margin-top: 10px; font-size: 14px; color: #555; white-space: pre-wrap; }
+        .log { margin-top: 10px; font-size: 14px; color: #555; white-space: pre-wrap; height: 150px; overflow-y: auto; border: 1px solid #eee; padding: 10px; background: #fafafa; }
     </style>
     <!-- Bibliotecas para ler PDF e Excel no navegador -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
@@ -24,7 +24,7 @@
 
 <div class="container">
     <h1>📄 Extrator de DIFAL para Excel</h1>
-    <p>Selecione as Notas Fiscais em PDF. O sistema preencherá o relatório base automaticamente.</p>
+    <p>Selecione as Notas Fiscais. O relatório será expandido lateralmente se houver mais de 18 notas.</p>
 
     <input type="file" id="pdfInput" multiple accept=".pdf">
     <button id="btnProcessar" onclick="processarArquivos()">Processar Notas</button>
@@ -41,7 +41,6 @@
         const arrayBuffer = await file.arrayBuffer();
         const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
         let fullText = "";
-        
         for (let i = 1; i <= pdf.numPages; i++) {
             const page = await pdf.getPage(i);
             const textContent = await page.getTextContent();
@@ -64,7 +63,7 @@
 
         btn.disabled = true;
         status.innerText = "Lendo PDFs...";
-        log.innerText = "";
+        log.innerText = "Iniciando leitura dos arquivos...\n";
         let dadosExtraidos = [];
 
         // 1. Lê os dados de todos os PDFs
@@ -72,21 +71,13 @@
             try {
                 const text = await extractTextFromPDF(file);
                 
-                // Expressões regulares para buscar os dados
                 const matchNf = text.match(/N\.\s*([\d\.]+)/);
                 const matchDifal = text.match(/DIFAL da UF Destino R\$\s*([\d\.,]+)/);
                 const matchFcp = text.match(/FCP R\$\s*([\d\.,]+)/);
 
                 let numeroNf = matchNf ? matchNf[1] : "N/A";
-                let valorDifal = 0;
-                let valorFcp = 0;
-
-                if (matchDifal) {
-                    valorDifal = parseFloat(matchDifal[1].replace('.', '').replace(',', '.'));
-                }
-                if (matchFcp) {
-                    valorFcp = parseFloat(matchFcp[1].replace('.', '').replace(',', '.'));
-                }
+                let valorDifal = matchDifal ? parseFloat(matchDifal[1].replace('.', '').replace(',', '.')) : 0;
+                let valorFcp = matchFcp ? parseFloat(matchFcp[1].replace('.', '').replace(',', '.')) : 0;
 
                 const valorTotal = valorDifal + valorFcp;
 
@@ -94,7 +85,7 @@
                     dadosExtraidos.push({ nf: numeroNf, valor: valorTotal });
                     log.innerText += `✅ NF ${numeroNf}: R$ ${valorTotal.toFixed(2)} extraído.\n`;
                 } else {
-                    log.innerText += `⚠️ Erro na NF ${file.name}: Número não encontrado.\n`;
+                    log.innerText += `⚠️ Erro: Número não encontrado em ${file.name}.\n`;
                 }
             } catch (error) {
                 log.innerText += `❌ Erro ao ler o arquivo ${file.name}.\n`;
@@ -102,69 +93,113 @@
         }
 
         if (dadosExtraidos.length === 0) {
-            status.innerText = "Nenhum dado válido encontrado.";
+            status.innerText = "Nenhum dado válido encontrado nas notas.";
             btn.disabled = false;
             return;
         }
 
-        // 2. Baixa o modelo Excel do próprio GitHub e edita
+        // 2. Baixa o modelo Excel do GitHub e edita
         status.innerText = "Preenchendo Excel...";
         try {
-            // O arquivo deve estar com este nome exato no seu repositório
             const response = await fetch('./Extrator PDF DIFAL.xlsx'); 
             if (!response.ok) throw new Error("Planilha modelo não encontrada no repositório.");
             
             const arrayBuffer = await response.arrayBuffer();
             const workbook = new ExcelJS.Workbook();
             await workbook.xlsx.load(arrayBuffer);
-            const worksheet = workbook.worksheets[0]; // Pega a primeira aba
+            const worksheet = workbook.worksheets[0]; 
 
-            // Procura as colunas DESCRIÇÃO e VALOR
-            let colDesc = null, colVal = null, linhaInicio = null;
-            
+            // Preenche a Data de Entrega
+            const dataHoje = new Date().toLocaleDateString('pt-BR');
+            for (let r = 1; r <= 15; r++) {
+                for (let c = 1; c <= 5; c++) {
+                    const celulaData = worksheet.getCell(r, c);
+                    if (celulaData.value && celulaData.value.toString().includes("Data Entrega")) {
+                        worksheet.getCell(r, c + 1).value = dataHoje;
+                        worksheet.getCell(r, c + 1).font = { bold: true };
+                        break;
+                    }
+                }
+            }
+
+            // Acha as colunas principais
+            let colDescOrig = null, colValOrig = null, linhaHeader = null;
             for (let r = 1; r <= 20; r++) {
                 for (let c = 1; c <= 10; c++) {
                     const celula = worksheet.getCell(r, c).value;
-                    if (celula === "DESCRIÇÃO") { colDesc = c; linhaInicio = r + 1; }
-                    if (celula === "VALOR") { colVal = c; }
+                    if (celula === "DESCRIÇÃO") { colDescOrig = c; linhaHeader = r; }
+                    if (celula === "VALOR") { colValOrig = c; }
                 }
             }
 
-            if (!colDesc || !colVal) {
-                status.innerText = "Erro: Colunas 'DESCRIÇÃO' e 'VALOR' não encontradas.";
+            if (!colDescOrig || !colValOrig) {
+                status.innerText = "Erro: Cabeçalhos 'DESCRIÇÃO' e 'VALOR' não encontrados.";
                 btn.disabled = false; return;
             }
 
-            // Preenche as linhas da planilha
-            let linhaAtual = linhaInicio;
-            for (const dado of dadosExtraidos) {
-                let celulaDesc = worksheet.getCell(linhaAtual, colDesc);
+            const MAX_LINHAS = 18;
+
+            // Insere os dados fazendo a quebra de colunas
+            for (let i = 0; i < dadosExtraidos.length; i++) {
+                const dado = dadosExtraidos[i];
+                const lote = Math.floor(i / MAX_LINHAS); 
                 
-                // Pula linhas que já tenham texto diferente de "DIFAL"
-                while (celulaDesc.value && celulaDesc.value.toString().trim() !== "DIFAL") {
-                    linhaAtual++;
-                    celulaDesc = worksheet.getCell(linhaAtual, colDesc);
+                const colDescAtual = colDescOrig + (lote * 2);
+                const colValAtual = colValOrig + (lote * 2);
+                const linhaAtual = (linhaHeader + 1) + (i % MAX_LINHAS);
+
+                // Desenha os cabeçalhos para as novas colunas clonadas
+                if (lote > 0 && (i % MAX_LINHAS === 0)) {
+                    const headerDesc = worksheet.getCell(linhaHeader, colDescAtual);
+                    const headerVal = worksheet.getCell(linhaHeader, colValAtual);
+                    
+                    headerDesc.value = "DESCRIÇÃO";
+                    headerVal.value = "VALOR";
+                    
+                    // Copia estilos do cabeçalho original e força o centro
+                    headerDesc.style = Object.assign({}, worksheet.getCell(linhaHeader, colDescOrig).style);
+                    headerVal.style = Object.assign({}, worksheet.getCell(linhaHeader, colValOrig).style);
+                    headerDesc.alignment = { vertical: 'middle', horizontal: 'center' };
+                    headerVal.alignment = { vertical: 'middle', horizontal: 'center' };
+
+                    // Espelha a largura das colunas base
+                    worksheet.getColumn(colDescAtual).width = worksheet.getColumn(colDescOrig).width || 20;
+                    worksheet.getColumn(colValAtual).width = worksheet.getColumn(colValOrig).width || 15;
                 }
 
-                // Insere os dados
-                worksheet.getCell(linhaAtual, colDesc).value = `DIFAL NF ${dado.nf}`;
-                worksheet.getCell(linhaAtual, colVal).value = dado.valor;
-                linhaAtual++;
+                const cellDesc = worksheet.getCell(linhaAtual, colDescAtual);
+                const cellVal = worksheet.getCell(linhaAtual, colValAtual);
+
+                // Copia o visual da linha matriz (bordas, cor de fundo)
+                const cellDescMatriz = worksheet.getCell(linhaAtual, colDescOrig);
+                const cellValMatriz = worksheet.getCell(linhaAtual, colValOrig);
+                cellDesc.style = Object.assign({}, cellDescMatriz.style);
+                cellVal.style = Object.assign({}, cellValMatriz.style);
+
+                // Escreve os dados
+                cellDesc.value = `DIFAL NF ${dado.nf}`;
+                cellVal.value = dado.valor;
+
+                // Força alinhamento central em tudo e formatação da moeda R$
+                cellDesc.alignment = { vertical: 'middle', horizontal: 'center' };
+                cellVal.alignment = { vertical: 'middle', horizontal: 'center' };
+                cellVal.numFmt = '"R$" #,##0.00';
             }
 
-            // 3. Salva e inicia o download
+            // 3. Salva e baixa automático
             const buffer = await workbook.xlsx.writeBuffer();
             const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = "Protocolo_DIFAL_Preenchido.xlsx";
+            a.download = `Protocolo_DIFAL_${new Date().toLocaleDateString('pt-BR').replace(/\//g, '-')}.xlsx`;
             a.click();
             window.URL.revokeObjectURL(url);
 
             status.innerText = "✅ Relatório gerado com sucesso!";
         } catch (error) {
             status.innerText = `Erro ao gerar Excel: ${error.message}`;
+            console.error(error);
         }
         
         btn.disabled = false;
