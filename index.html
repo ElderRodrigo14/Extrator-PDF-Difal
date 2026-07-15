@@ -186,6 +186,14 @@
                 cellVal.numFmt = '"R$" #,##0.00';
             }
 
+            // CORREÇÃO DO LIMITE DE PÁGINA (PRINT AREA)
+            // Remove as limitações de margem do modelo base
+            worksheet.pageSetup.printArea = undefined;
+            // Força o Excel a "espremer" as colunas criadas na largura de 1 folha
+            worksheet.pageSetup.fitToPage = true;
+            worksheet.pageSetup.fitToWidth = 1;
+            worksheet.pageSetup.fitToHeight = 1;
+
             // 3. Salva e baixa automático
             const buffer = await workbook.xlsx.writeBuffer();
             const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
