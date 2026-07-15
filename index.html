@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Extrator DIFAL/FCP</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; background-color: #f4f4f9; }
+        .container { background-color: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        h1 { color: #333; font-size: 24px; margin-bottom: 5px; }
+        p { color: #666; margin-bottom: 20px; }
+        input[type="file"] { display: block; margin-bottom: 20px; }
+        button { background-color: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 16px; }
+        button:hover { background-color: #0056b3; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+        #status { margin-top: 20px; font-weight: bold; color: #333; }
+        .log { margin-top: 10px; font-size: 14px; color: #555; white-space: pre-wrap; }
+    </style>
+    <!-- Bibliotecas para ler PDF e Excel no navegador -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
+</head>
+<body>
+
+<div class="container">
+    <h1>📄 Extrator de DIFAL para Excel</h1>
+    <p>Selecione as Notas Fiscais em PDF. O sistema preencherá o relatório base automaticamente.</p>
+
+    <input type="file" id="pdfInput" multiple accept=".pdf">
+    <button id="btnProcessar" onclick="processarArquivos()">Processar Notas</button>
+
+    <div id="status"></div>
+    <div id="log" class="log"></div>
+</div>
+
+<script>
+    // Configura o leitor de PDF
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+
+    async function extractTextFromPDF(file) {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+        let fullText = "";
+        
+        for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const textContent = await page.getTextContent();
+            const pageText = textContent.items.map(item => item.str).join(" ");
+            fullText += pageText + " ";
+        }
+        return fullText;
+    }
+
+    async function processarArquivos() {
+        const fileInput = document.getElementById('pdfInput');
+        const btn = document.getElementById('btnProcessar');
+        const status = document.getElementById('status');
+        const log = document.getElementById('log');
+
+        if (fileInput.files.length === 0) {
+            alert("Por favor, selecione pelo menos um arquivo PDF.");
+            return;
+        }
+
+        btn.disabled = true;
+        status.innerText = "Lendo PDFs...";
+        log.innerText = "";
+        let dadosExtraidos = [];
+
+        // 1. Lê os dados de todos os PDFs
+        for (const file of fileInput.files) {
+            try {
+                const text = await extractTextFromPDF(file);
+                
+                // Expressões regulares para buscar os dados
+                const matchNf = text.match(/N\.\s*([\d\.]+)/);
+                const matchDifal = text.match(/DIFAL da UF Destino R\$\s*([\d\.,]+)/);
+                const matchFcp = text.match(/FCP R\$\s*([\d\.,]+)/);
+
+                let numeroNf = matchNf ? matchNf[1] : "N/A";
+                let valorDifal = 0;
+                let valorFcp = 0;
+
+                if (matchDifal) {
+                    valorDifal = parseFloat(matchDifal[1].replace('.', '').replace(',', '.'));
+                }
+                if (matchFcp) {
+                    valorFcp = parseFloat(matchFcp[1].replace('.', '').replace(',', '.'));
+                }
+
+                const valorTotal = valorDifal + valorFcp;
+
+                if (numeroNf !== "N/A") {
+                    dadosExtraidos.push({ nf: numeroNf, valor: valorTotal });
+                    log.innerText += `✅ NF ${numeroNf}: R$ ${valorTotal.toFixed(2)} extraído.\n`;
+                } else {
+                    log.innerText += `⚠️ Erro na NF ${file.name}: Número não encontrado.\n`;
+                }
+            } catch (error) {
+                log.innerText += `❌ Erro ao ler o arquivo ${file.name}.\n`;
+            }
+        }
+
+        if (dadosExtraidos.length === 0) {
+            status.innerText = "Nenhum dado válido encontrado.";
+            btn.disabled = false;
+            return;
+        }
+
+        // 2. Baixa o modelo Excel do próprio GitHub e edita
+        status.innerText = "Preenchendo Excel...";
+        try {
+            // O arquivo deve estar com este nome exato no seu repositório
+            const response = await fetch('./Extrator PDF DIFAL.xlsx'); 
+            if (!response.ok) throw new Error("Planilha modelo não encontrada no repositório.");
+            
+            const arrayBuffer = await response.arrayBuffer();
+            const workbook = new ExcelJS.Workbook();
+            await workbook.xlsx.load(arrayBuffer);
+            const worksheet = workbook.worksheets[0]; // Pega a primeira aba
+
+            // Procura as colunas DESCRIÇÃO e VALOR
+            let colDesc = null, colVal = null, linhaInicio = null;
+            
+            for (let r = 1; r <= 20; r++) {
+                for (let c = 1; c <= 10; c++) {
+                    const celula = worksheet.getCell(r, c).value;
+                    if (celula === "DESCRIÇÃO") { colDesc = c; linhaInicio = r + 1; }
+                    if (celula === "VALOR") { colVal = c; }
+                }
+            }
+
+            if (!colDesc || !colVal) {
+                status.innerText = "Erro: Colunas 'DESCRIÇÃO' e 'VALOR' não encontradas.";
+                btn.disabled = false; return;
+            }
+
+            // Preenche as linhas da planilha
+            let linhaAtual = linhaInicio;
+            for (const dado of dadosExtraidos) {
+                let celulaDesc = worksheet.getCell(linhaAtual, colDesc);
+                
+                // Pula linhas que já tenham texto diferente de "DIFAL"
+                while (celulaDesc.value && celulaDesc.value.toString().trim() !== "DIFAL") {
+                    linhaAtual++;
+                    celulaDesc = worksheet.getCell(linhaAtual, colDesc);
+                }
+
+                // Insere os dados
+                worksheet.getCell(linhaAtual, colDesc).value = `DIFAL NF ${dado.nf}`;
+                worksheet.getCell(linhaAtual, colVal).value = dado.valor;
+                linhaAtual++;
+            }
+
+            // 3. Salva e inicia o download
+            const buffer = await workbook.xlsx.writeBuffer();
+            const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = "Protocolo_DIFAL_Preenchido.xlsx";
+            a.click();
+            window.URL.revokeObjectURL(url);
+
+            status.innerText = "✅ Relatório gerado com sucesso!";
+        } catch (error) {
+            status.innerText = `Erro ao gerar Excel: ${error.message}`;
+        }
+        
+        btn.disabled = false;
+    }
+</script>
+
+</body>
+</html>
