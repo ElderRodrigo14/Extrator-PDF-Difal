@@ -38,20 +38,19 @@
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
     // ==========================================
-    // CONFIGURAÇÃO DE POSIÇÃO (Eixos X e Y)
-    // O Eixo Y no PDF começa no zero na parte de BAIXO da página.
+    // COORDENADAS AJUSTADAS COM BASE NO PRINT
     // ==========================================
     const pos = {
-        dataX: 130,             // Distância da borda esquerda para a Data
-        dataY: 670,             // Distância do fundo da página até a Data
+        dataX: 180,             // Ajustado para iniciar após a palavra "Data Entrega:"
+        dataY: 605,             // Baixou de "PROTOCOLO" para a linha correta
         
-        primeiraLinhaY: 570,    // Altura da PRIMEIRA linha da tabela
-        espacamentoLinhas: 18.5, // Distância entre uma linha e outra para baixo
+        primeiraLinhaY: 535,    // Alinhado com o centro da primeira linha da tabela
+        espacamentoLinhas: 21.8, // Aumentado levemente para encaixar nas 18 linhas da tabela
         
-        colDescX: 80,           // Distância da borda esquerda para a palavra "DIFAL..."
-        colValorX: 250,         // Distância da borda esquerda para o valor "R$..."
+        colDescX: 230,          // Movido para a direita, para escrever logo após a palavra "DIFAL" já impressa
+        colValorX: 445,         // Movido para a direita, para escrever logo após o "R$" já impresso
         
-        larguraNovaColuna: 220  // Espaço para pular pra direita a cada 18 notas
+        larguraNovaColuna: 0    // Como a folha A4 não estica, travamos em 0
     };
     // ==========================================
 
@@ -84,7 +83,6 @@
         log.innerText = "Iniciando leitura dos arquivos...\n";
         let dadosExtraidos = [];
 
-        // 1. Lê os dados
         for (const file of fileInput.files) {
             try {
                 const text = await extractTextFromPDF(file);
@@ -116,10 +114,8 @@
             return;
         }
 
-        // 2. Preenche o PDF
         status.innerText = "Preenchendo Protocolo PDF...";
         try {
-            // Puxa o modelo em PDF do seu repositório
             const response = await fetch('./modelo.pdf'); 
             if (!response.ok) throw new Error("O arquivo 'modelo.pdf' não foi encontrado no repositório.");
             
@@ -128,11 +124,9 @@
             const pages = pdfDoc.getPages();
             const firstPage = pages[0];
 
-            // Define fontes
             const fontBold = await pdfDoc.embedFont(PDFLib.StandardFonts.HelveticaBold);
             const fontRegular = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
 
-            // Escreve a Data
             const dataHoje = new Date().toLocaleDateString('pt-BR');
             firstPage.drawText(dataHoje, { 
                 x: pos.dataX, 
@@ -141,28 +135,32 @@
                 font: fontBold 
             });
 
-            // Escreve as NFs
             const MAX_LINHAS = 18;
 
             for (let i = 0; i < dadosExtraidos.length; i++) {
-                const dado = dadosExtraidos[i];
-                const lote = Math.floor(i / MAX_LINHAS); 
-                const linha = i % MAX_LINHAS;
+                // Previne que ultrapasse o limite de 18 linhas do layout da página A4
+                if (i >= MAX_LINHAS) {
+                    log.innerText += `\n⚠️ Limite de 18 notas atingido. NFs excedentes ignoradas nesta folha.`;
+                    break;
+                }
 
-                const xDescAtual = pos.colDescX + (lote * pos.larguraNovaColuna);
-                const xValAtual = pos.colValorX + (lote * pos.larguraNovaColuna);
+                const dado = dadosExtraidos[i];
+                const linha = i;
+
+                const xDescAtual = pos.colDescX;
+                const xValAtual = pos.colValorX;
                 const yAtual = pos.primeiraLinhaY - (linha * pos.espacamentoLinhas);
 
-                // Desenha a Descrição
-                firstPage.drawText(`DIFAL NF ${dado.nf}`, { 
+                // Escreve apenas "NF xxxx" (pois o modelo já possui a palavra DIFAL)
+                firstPage.drawText(`NF ${dado.nf}`, { 
                     x: xDescAtual, 
                     y: yAtual, 
                     size: 9, 
                     font: fontBold 
                 });
 
-                // Formata o valor para R$ e desenha
-                const valorFormatado = dado.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+                // Escreve apenas o valor "XX,XX" (pois o modelo já possui a sigla R$)
+                const valorFormatado = dado.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 firstPage.drawText(valorFormatado, { 
                     x: xValAtual, 
                     y: yAtual, 
@@ -171,7 +169,6 @@
                 });
             }
 
-            // 3. Baixa o PDF
             const pdfBytes = await pdfDoc.save();
             const blob = new Blob([pdfBytes], { type: "application/pdf" });
             const url = window.URL.createObjectURL(blob);
