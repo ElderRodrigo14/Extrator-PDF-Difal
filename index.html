@@ -5,18 +5,31 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Extrator DIFAL/FCP para PDF</title>
     <style>
-        body { font-family: Arial, sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; background-color: #f4f4f9; }
+        body { font-family: Arial, sans-serif; max-width: 650px; margin: 40px auto; padding: 20px; background-color: #f4f4f9; }
         .container { background-color: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
         h1 { color: #333; font-size: 24px; margin-bottom: 5px; }
         p { color: #666; margin-bottom: 20px; }
         input[type="file"] { display: block; margin-bottom: 20px; }
-        button { background-color: #e53e3e; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 16px; }
-        button:hover { background-color: #c53030; }
-        button:disabled { background-color: #ccc; cursor: not-allowed; }
-        #status { margin-top: 20px; font-weight: bold; color: #333; }
-        .log { margin-top: 10px; font-size: 14px; color: #555; white-space: pre-wrap; height: 150px; overflow-y: auto; border: 1px solid #eee; padding: 10px; background: #fafafa; }
+        
+        .btn-principal { background-color: #e53e3e; color: white; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; width: 100%; margin-bottom: 20px; }
+        .btn-principal:hover { background-color: #c53030; }
+        .btn-principal:disabled { background-color: #ccc; cursor: not-allowed; }
+        
+        .btn-teste { background-color: #4a5568; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px; margin-top: 10px; width: 100%;}
+        .btn-teste:hover { background-color: #2d3748; }
+
+        /* Painel de Calibração */
+        details { background-color: #edf2f7; padding: 15px; border-radius: 6px; margin-bottom: 20px; border: 1px solid #cbd5e0; }
+        summary { font-weight: bold; cursor: pointer; color: #2d3748; outline: none; }
+        .grid-configs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; }
+        .config-item { display: flex; flex-direction: column; }
+        .config-item label { font-size: 12px; font-weight: bold; color: #4a5568; margin-bottom: 4px; }
+        .config-item input { padding: 6px; border: 1px solid #a0aec0; border-radius: 4px; font-size: 14px; }
+
+        #status { margin-top: 20px; font-weight: bold; color: #333; text-align: center; }
+        .log { margin-top: 10px; font-size: 13px; color: #555; white-space: pre-wrap; height: 150px; overflow-y: auto; border: 1px solid #e2e8f0; padding: 10px; background: #f7fafc; border-radius: 4px;}
     </style>
-    <!-- Bibliotecas PDF.js (Leitura) e PDF-lib (Escrita) -->
+    <!-- Bibliotecas -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 </head>
@@ -24,35 +37,85 @@
 
 <div class="container">
     <h1>📄 Extrator de DIFAL para PDF</h1>
-    <p>Selecione as Notas Fiscais. O sistema preencherá o protocolo PDF automaticamente.</p>
+    <p>Faça o upload das notas para preencher o protocolo automaticamente.</p>
+
+    <details>
+        <summary>⚙️ Modo de Calibração (Ajuste de Posição)</summary>
+        <p style="font-size: 12px; margin-top: 10px;">Aumentar o X empurra para a <b>direita</b>. Aumentar o Y empurra para <b>cima</b>.</p>
+        <div class="grid-configs">
+            <div class="config-item"><label>Data - Eixo X (Esquerda/Direita)</label><input type="number" id="cfgDataX" value="175"></div>
+            <div class="config-item"><label>Data - Eixo Y (Cima/Baixo)</label><input type="number" id="cfgDataY" value="622"></div>
+            
+            <div class="config-item"><label>Descrição (NF) - Eixo X</label><input type="number" id="cfgDescX" value="215"></div>
+            <div class="config-item"><label>Valor (R$) - Eixo X</label><input type="number" id="cfgValorX" value="415"></div>
+            
+            <div class="config-item"><label>1ª Linha da Tabela - Eixo Y</label><input type="number" id="cfgPrimeiraLinhaY" value="565"></div>
+            <div class="config-item"><label>Espaçamento entre as Linhas</label><input type="number" step="0.1" id="cfgEspacamento" value="18.5"></div>
+        </div>
+        <button class="btn-teste" onclick="gerarPDFTeste()">Baixar PDF de Teste Visual</button>
+    </details>
 
     <input type="file" id="pdfInput" multiple accept=".pdf">
-    <button id="btnProcessar" onclick="processarArquivos()">Gerar Protocolo PDF</button>
+    <button class="btn-principal" id="btnProcessar" onclick="processarArquivos()">Processar Notas Fiscais (Valendo)</button>
 
     <div id="status"></div>
-    <div id="log" class="log"></div>
+    <div id="log" class="log">Aguardando arquivos...</div>
 </div>
 
 <script>
-    // Configura o leitor de PDF
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
-    // ==========================================
-    // COORDENADAS RECALIBRADAS COM BASE NO PRINT
-    // ==========================================
-    const pos = {
-        dataX: 160,             // Puxado para a esquerda para alinhar com o começo da linha
-        dataY: 620,             // Subiu para ficar em cima da linha "Data Entrega:"
+    // Captura as coordenadas digitadas no painel
+    function getPosicoes() {
+        return {
+            dataX: parseFloat(document.getElementById('cfgDataX').value),
+            dataY: parseFloat(document.getElementById('cfgDataY').value),
+            colDescX: parseFloat(document.getElementById('cfgDescX').value),
+            colValorX: parseFloat(document.getElementById('cfgValorX').value),
+            primeiraLinhaY: parseFloat(document.getElementById('cfgPrimeiraLinhaY').value),
+            espacamentoLinhas: parseFloat(document.getElementById('cfgEspacamento').value)
+        };
+    }
+
+    // FUNÇÃO DE TESTE VISUAL (Imprime 18 linhas falsas para você regular as margens)
+    async function gerarPDFTeste() {
+        const status = document.getElementById('status');
+        status.innerText = "Gerando Teste...";
         
-        primeiraLinhaY: 553,    // Subiu para alinhar perfeitamente com a primeira linha do "DIFAL"
-        espacamentoLinhas: 18.4, // Reduzido para corrigir o "efeito cascata" que estava empurrando os textos para o rodapé
-        
-        colDescX: 185,          // Puxado para a esquerda para ficar logo após a palavra "DIFAL"
-        colValorX: 380,         // Puxado bastante para a esquerda para ficar logo após o "R$"
-        
-        larguraNovaColuna: 0    
-    };
-    // ==========================================
+        try {
+            const response = await fetch('./modelo.pdf'); 
+            if (!response.ok) throw new Error("O arquivo 'modelo.pdf' não foi encontrado.");
+            
+            const existingPdfBytes = await response.arrayBuffer();
+            const pdfDoc = await PDFLib.PDFDocument.load(existingPdfBytes);
+            const firstPage = pdfDoc.getPages()[0];
+            const fontBold = await pdfDoc.embedFont(PDFLib.StandardFonts.HelveticaBold);
+            const fontRegular = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
+            const pos = getPosicoes();
+
+            // Imprime Data
+            firstPage.drawText("16/07/2026", { x: pos.dataX, y: pos.dataY, size: 11, font: fontBold });
+
+            // Imprime 18 linhas de teste
+            for (let i = 0; i < 18; i++) {
+                const yAtual = pos.primeiraLinhaY - (i * pos.espacamentoLinhas);
+                firstPage.drawText(`NF 000${i+1}`, { x: pos.colDescX, y: yAtual, size: 9, font: fontBold });
+                firstPage.drawText("99,99", { x: pos.colValorX, y: yAtual, size: 9, font: fontRegular });
+            }
+
+            const pdfBytes = await pdfDoc.save();
+            const blob = new Blob([pdfBytes], { type: "application/pdf" });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `CALIBRACAO_ALINHAMENTO.pdf`;
+            a.click();
+            window.URL.revokeObjectURL(url);
+            status.innerText = "✅ Teste gerado! Verifique o alinhamento.";
+        } catch (error) {
+            status.innerText = `Erro: ${error.message}`;
+        }
+    }
 
     async function extractTextFromPDF(file) {
         const arrayBuffer = await file.arrayBuffer();
@@ -74,19 +137,18 @@
         const log = document.getElementById('log');
 
         if (fileInput.files.length === 0) {
-            alert("Por favor, selecione pelo menos um arquivo PDF de Nota Fiscal.");
+            alert("Selecione os arquivos PDF das Notas Fiscais.");
             return;
         }
 
         btn.disabled = true;
         status.innerText = "Lendo NFs...";
-        log.innerText = "Iniciando leitura dos arquivos...\n";
+        log.innerText = "Iniciando leitura...\n";
         let dadosExtraidos = [];
 
         for (const file of fileInput.files) {
             try {
                 const text = await extractTextFromPDF(file);
-                
                 const matchNf = text.match(/N\.\s*([\d\.]+)/);
                 const matchDifal = text.match(/DIFAL da UF Destino R\$\s*([\d\.,]+)/);
                 const matchFcp = text.match(/FCP R\$\s*([\d\.,]+)/);
@@ -95,21 +157,19 @@
                 let valorDifal = matchDifal ? parseFloat(matchDifal[1].replace('.', '').replace(',', '.')) : 0;
                 let valorFcp = matchFcp ? parseFloat(matchFcp[1].replace('.', '').replace(',', '.')) : 0;
 
-                const valorTotal = valorDifal + valorFcp;
-
                 if (numeroNf !== "N/A") {
-                    dadosExtraidos.push({ nf: numeroNf, valor: valorTotal });
-                    log.innerText += `✅ NF ${numeroNf}: R$ ${valorTotal.toFixed(2)} extraído.\n`;
+                    dadosExtraidos.push({ nf: numeroNf, valor: (valorDifal + valorFcp) });
+                    log.innerText += `✅ NF ${numeroNf} computada.\n`;
                 } else {
-                    log.innerText += `⚠️ Erro: Número não encontrado em ${file.name}.\n`;
+                    log.innerText += `⚠️ Erro na NF: ${file.name}\n`;
                 }
             } catch (error) {
-                log.innerText += `❌ Erro ao ler o arquivo ${file.name}.\n`;
+                log.innerText += `❌ Erro ao ler: ${file.name}\n`;
             }
         }
 
         if (dadosExtraidos.length === 0) {
-            status.innerText = "Nenhum dado válido encontrado nas notas.";
+            status.innerText = "Nenhum dado encontrado.";
             btn.disabled = false;
             return;
         }
@@ -117,53 +177,34 @@
         status.innerText = "Preenchendo Protocolo PDF...";
         try {
             const response = await fetch('./modelo.pdf'); 
-            if (!response.ok) throw new Error("O arquivo 'modelo.pdf' não foi encontrado no repositório.");
+            if (!response.ok) throw new Error("O arquivo 'modelo.pdf' não foi encontrado.");
             
             const existingPdfBytes = await response.arrayBuffer();
             const pdfDoc = await PDFLib.PDFDocument.load(existingPdfBytes);
-            const pages = pdfDoc.getPages();
-            const firstPage = pages[0];
+            const firstPage = pdfDoc.getPages()[0];
 
             const fontBold = await pdfDoc.embedFont(PDFLib.StandardFonts.HelveticaBold);
             const fontRegular = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
+            const pos = getPosicoes();
 
             const dataHoje = new Date().toLocaleDateString('pt-BR');
-            firstPage.drawText(dataHoje, { 
-                x: pos.dataX, 
-                y: pos.dataY, 
-                size: 11, 
-                font: fontBold 
-            });
+            firstPage.drawText(dataHoje, { x: pos.dataX, y: pos.dataY, size: 11, font: fontBold });
 
             const MAX_LINHAS = 18;
 
             for (let i = 0; i < dadosExtraidos.length; i++) {
                 if (i >= MAX_LINHAS) {
-                    log.innerText += `\n⚠️ Limite de 18 notas atingido. NFs excedentes ignoradas nesta folha.`;
+                    log.innerText += `\n⚠️ Limite atingido. Somente 18 impressas.`;
                     break;
                 }
 
                 const dado = dadosExtraidos[i];
-                const linha = i;
+                const yAtual = pos.primeiraLinhaY - (i * pos.espacamentoLinhas);
 
-                const xDescAtual = pos.colDescX;
-                const xValAtual = pos.colValorX;
-                const yAtual = pos.primeiraLinhaY - (linha * pos.espacamentoLinhas);
-
-                firstPage.drawText(`NF ${dado.nf}`, { 
-                    x: xDescAtual, 
-                    y: yAtual, 
-                    size: 9, 
-                    font: fontBold 
-                });
-
-                const valorFormatado = dado.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                firstPage.drawText(valorFormatado, { 
-                    x: xValAtual, 
-                    y: yAtual, 
-                    size: 9, 
-                    font: fontRegular 
-                });
+                firstPage.drawText(`NF ${dado.nf}`, { x: pos.colDescX, y: yAtual, size: 9, font: fontBold });
+                
+                const valorFmt = dado.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                firstPage.drawText(valorFmt, { x: pos.colValorX, y: yAtual, size: 9, font: fontRegular });
             }
 
             const pdfBytes = await pdfDoc.save();
@@ -175,12 +216,10 @@
             a.click();
             window.URL.revokeObjectURL(url);
 
-            status.innerText = "✅ Protocolo gerado com sucesso!";
+            status.innerText = "✅ Protocolo finalizado!";
         } catch (error) {
-            status.innerText = `Erro ao gerar PDF: ${error.message}`;
-            console.error(error);
+            status.innerText = `Erro: ${error.message}`;
         }
-        
         btn.disabled = false;
     }
 </script>
