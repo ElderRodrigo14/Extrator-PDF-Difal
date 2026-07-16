@@ -38,19 +38,19 @@
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
     // ==========================================
-    // COORDENADAS AJUSTADAS COM BASE NO PRINT
+    // COORDENADAS RECALIBRADAS COM BASE NO PRINT
     // ==========================================
     const pos = {
-        dataX: 180,             // Ajustado para iniciar após a palavra "Data Entrega:"
-        dataY: 605,             // Baixou de "PROTOCOLO" para a linha correta
+        dataX: 160,             // Puxado para a esquerda para alinhar com o começo da linha
+        dataY: 620,             // Subiu para ficar em cima da linha "Data Entrega:"
         
-        primeiraLinhaY: 535,    // Alinhado com o centro da primeira linha da tabela
-        espacamentoLinhas: 21.8, // Aumentado levemente para encaixar nas 18 linhas da tabela
+        primeiraLinhaY: 553,    // Subiu para alinhar perfeitamente com a primeira linha do "DIFAL"
+        espacamentoLinhas: 18.4, // Reduzido para corrigir o "efeito cascata" que estava empurrando os textos para o rodapé
         
-        colDescX: 230,          // Movido para a direita, para escrever logo após a palavra "DIFAL" já impressa
-        colValorX: 445,         // Movido para a direita, para escrever logo após o "R$" já impresso
+        colDescX: 185,          // Puxado para a esquerda para ficar logo após a palavra "DIFAL"
+        colValorX: 380,         // Puxado bastante para a esquerda para ficar logo após o "R$"
         
-        larguraNovaColuna: 0    // Como a folha A4 não estica, travamos em 0
+        larguraNovaColuna: 0    
     };
     // ==========================================
 
@@ -138,7 +138,6 @@
             const MAX_LINHAS = 18;
 
             for (let i = 0; i < dadosExtraidos.length; i++) {
-                // Previne que ultrapasse o limite de 18 linhas do layout da página A4
                 if (i >= MAX_LINHAS) {
                     log.innerText += `\n⚠️ Limite de 18 notas atingido. NFs excedentes ignoradas nesta folha.`;
                     break;
@@ -151,7 +150,6 @@
                 const xValAtual = pos.colValorX;
                 const yAtual = pos.primeiraLinhaY - (linha * pos.espacamentoLinhas);
 
-                // Escreve apenas "NF xxxx" (pois o modelo já possui a palavra DIFAL)
                 firstPage.drawText(`NF ${dado.nf}`, { 
                     x: xDescAtual, 
                     y: yAtual, 
@@ -159,7 +157,6 @@
                     font: fontBold 
                 });
 
-                // Escreve apenas o valor "XX,XX" (pois o modelo já possui a sigla R$)
                 const valorFormatado = dado.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 firstPage.drawText(valorFormatado, { 
                     x: xValAtual, 
